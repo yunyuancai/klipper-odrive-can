@@ -14,7 +14,7 @@ Klipper(树莓派)──运动规划(trapq)──> odrive_can.py ──CAN 500k�
                                                             ↑ 光栅尺/磁栅尺接 J5
 ```
 
-配套固件:ODrive devel 分支加了线性光栅尺支持的修改版(仓库地址见文末),
+配套固件:[odrive-linear](https://github.com/yunyuancai/odrive-linear),ODrive devel 分支加了线性光栅尺支持的修改版。
 `encoder.config.is_linear = True` 后位置单位是米,模块里的
 `unit_scale: 0.001` 就是做 mm→m 的换算。
 
@@ -91,5 +91,4 @@ gcode:
 
 ## 相关仓库
 
-- 修改版 ODrive 固件(直线电机 + 光栅尺/磁栅尺):(见我的仓库列表)
 - ODrive 官方 CAN 协议说明:https://docs.odriverobotics.com/v/latest/guides/can-guide.html
