@@ -1,49 +1,56 @@
 # klipper-odrive-can
 
-Klipper 通过 CAN 总线直连 ODrive,中间不需要任何 MCU 来生成 step/dir 脉冲。
+Drive an ODrive directly from Klipper over CAN bus — no MCU generating
+step/dir pulses in between.
 
-起因很简单:直线电机的速度远超 ODrive step/dir 口的 5 万脉冲/秒上限,
-而 Klipper 的运动规划本来就在树莓派上算完了,规划好的轨迹就躺在 trapq 里。
-既然如此,何必再拿一块 MCU 把轨迹变成脉冲?直接按固定频率从 trapq 里取出
-当前应有的位置和速度,用 ODrive 的 CAN-simple 协议(`Set_Input_Pos`
-位置 + 速度前馈)发给驱动器,让 ODrive 在自己的 8kHz FOC 闭环里执行。
-反馈是光栅尺/磁栅尺,分辨率 µm 级,不受脉冲当量限制。
+The motivation is simple: linear motors blow way past the 50k step/s ceiling
+of ODrive's step/dir input, while Klipper does all of its motion planning on
+the host anyway, and the planned trajectory just sits there in the trapq. So
+why route it through an MCU and back into pulses? This module samples the
+planned trajectory at a fixed host rate and streams position (plus velocity
+feedforward) to the drive using ODrive's CAN-simple protocol
+(`Set_Input_Pos`), letting the ODrive close the loop in its own 8kHz FOC.
+Feedback comes from a linear scale, so resolution is micrometers, not your
+step distance.
 
 ```
-Klipper(树莓派)──运动规划(trapq)──> odrive_can.py ──CAN 500k──> ODrive ──> 直线电机
-                                                            ↑ 光栅尺/磁栅尺接 J5
+Klipper (Raspberry Pi) -- plan (trapq) --> odrive_can.py --CAN 500k--> ODrive --> linear motor
+                                                                     ^ scale on J5
 ```
 
-配套固件:直线电机方案用 [odrive-linear](https://github.com/yunyuancai/odrive-linear)
-(ODrive devel 分支加了线性光栅尺支持的修改版),`encoder.config.is_linear = True`
-后位置单位是米,模块里的 `unit_scale: 0.001` 做 mm→m 换算。
-旋转电机不用换固件,官方固件直接可用,见下文[旋转电机](#旋转电机)一节。
+Companion firmware: [odrive-linear](https://github.com/yunyuancai/odrive-linear),
+a devel-branch build with linear scale support. With
+`encoder.config.is_linear = True` positions are in meters, and the module's
+`unit_scale: 0.001` does the mm->m conversion.
+Rotary motors don't need custom firmware at all — stock ODrive firmware
+works, see [Rotary motors](#rotary-motors) below.
 
-## 安装
+## Install
 
 ```bash
 cp extras/odrive_can.py ~/klipper/klippy/extras/
-sudo ip link set can0 up type can bitrate 500000   # 和 ODrive 端保持一致
+sudo ip link set can0 up type can bitrate 500000   # match the ODrive setting
 ```
 
-只用 Python 标准库(内核原生 SocketCAN),宿主机上不用装任何东西。
-树莓派需要一块 CAN 扩展(MCP2515 或原生 CAN 的板子),ODrive 板上自带
-收发器,CAN_H/CAN_L 对接、两端各一个 120Ω 终端电阻即可。
+Only the Python standard library is used (raw kernel SocketCAN), so there is
+nothing to pip install on the host. The Pi needs a CAN interface (MCP2515 or
+a native-CAN board); the ODrive has its own transceiver onboard — wire
+CAN_H/CAN_L across with 120ohm terminators at both ends.
 
 ## printer.cfg
 
 ```ini
 [odrive_can x_drive]
-node_id: 0              # axis0 默认节点号 0
+node_id: 0              # axis0 defaults to node 0
 can_interface: can0
-letter: x               # 打印运动中跟随哪个轴(x/y/z)
-unit_scale: 0.001       # Klipper 毫米 -> ODrive 单位(直线电机:米;旋转电机:圈,或直接用 screw_lead)
-stream_rate: 60         # 流式下发频率,宿主性能好可以开到 100
-stream_lead: 0.005      # 提前量,把 5ms 后的位置发出去
-vel_ff_gain: 1.0        # 速度前馈比例
+letter: x               # which cartesian axis to follow during prints (x/y/z)
+unit_scale: 0.001       # Klipper mm -> ODrive units (meters linear, turns rotary, or use screw_lead)
+stream_rate: 60         # streaming rate in Hz; 100 works on a healthy host
+stream_lead: 0.005      # send the position 5ms in the future
+vel_ff_gain: 1.0        # velocity feedforward ratio
 velocity_limit: 1.5     # [m/s]
 current_limit: 20.0     # [A]
-trajectory_vel_limit: 1.0      # 手动移动用的板上梯形规划限速
+trajectory_vel_limit: 1.0      # on-board trapezoidal limits for manual moves
 trajectory_accel_limit: 10.0
 
 [gcode_macro ODRIVE_START]
@@ -55,70 +62,82 @@ gcode:
     ODRIVE_CAN_SET NAME=x_drive STATE=idle STREAM=0
 ```
 
-`START_PRINT` 里调 `ODRIVE_START`,`END_PRINT` 里调 `ODRIVE_STOP`。
+Call `ODRIVE_START` in your `START_PRINT` macro and `ODRIVE_STOP` in
+`END_PRINT`.
 
-## 命令
+## Commands
 
-| 命令 | 说明 |
+| Command | Purpose |
 |---|---|
-| `ODRIVE_CAN_SET NAME=<名> STATE=<状态> [STREAM=1/0] [CLEAR_ERRORS=1]` | 状态有 full_calibration、encoder_offset_calibration、closed_loop、idle、homing 等 |
-| `ODRIVE_CAN_MOVE NAME=<名> POS=<mm> [VEL=<mm/s>] [ACCEL=<mm/s²>]` | 手动绝对移动,给了 VEL/ACCEL 走板上梯形规划 |
-| `ODRIVE_CAN_HOME NAME=<名> [WAIT=1]` | 跑 ODrive 端的 endstop 回零 |
-| `ODRIVE_CAN_STATUS NAME=<名>` | 回读状态、错误、位置、速度 |
+| `ODRIVE_CAN_SET NAME=<name> STATE=<state> [STREAM=1/0] [CLEAR_ERRORS=1]` | States include full_calibration, encoder_offset_calibration, closed_loop, idle, homing |
+| `ODRIVE_CAN_MOVE NAME=<name> POS=<mm> [VEL=<mm/s>] [ACCEL=<mm/s^2>]` | Manual absolute move; with VEL/ACCEL it uses the on-board trapezoidal planner |
+| `ODRIVE_CAN_HOME NAME=<name> [WAIT=1]` | Run the ODrive endstop homing routine |
+| `ODRIVE_CAN_STATUS NAME=<name>` | Read back state, errors, position, velocity |
 
-首次对齐:进入闭环时模块会自动把 ODrive 的输入位置同步到 Klipper 当前指令
-位置,不会跳轴;之后把动子推到机械原点(或先 `ODRIVE_CAN_HOME`),再
-`G92 X0` 对一次坐标即可。
+First-time alignment: when entering closed loop the module syncs the ODrive
+input position to Klipper's current commanded position, so nothing jumps.
+Then move the forcer to a known reference (or run `ODRIVE_CAN_HOME` first)
+and `G92 X0` once — after that print moves just work.
 
-## 两种玩法
+## Rotary motors
 
-**独立轴**(点胶台、激光滑台这类):不进打印运动学,直接用
-`ODRIVE_CAN_MOVE`/`ODRIVE_CAN_HOME` 的宏控制,`letter` 随便填。
+This module is not linear-motor-only. Ball screws, rotary tables, spindles —
+all work the same way, and with **stock ODrive firmware** (no custom build
+needed). The only difference is that ODrive's position unit goes back to
+turns, so you configure the conversion:
 
-**镜像跟随**(龙门双驱之类):该轴运动学里还有普通电机,ODrive 通过
-`letter: x` 实时跟随 X 轴规划轨迹做全闭环补偿。
-
-想用一颗直线电机单独顶掉整个 X 轴、并接进 G28/运动学的话,得给 Klipper
-加虚拟 stepper 支持——Klipper 的运动轴必须绑定 MCU step 引脚,这是它的
-架构限制,官方 issue #3151 讨论了很多年也没落地,这个模块没有去动内核。
-
-## 旋转电机
-
-这套模块不是只给直线电机的,旋转电机(丝杆、转台、主轴之类)同样能用,
-而且**用 ODrive 官方固件就行**,不需要刷修改版固件——区别只是 ODrive 的
-位置单位从"米"变回"圈",换算配好即可:
-
-**丝杆滑台**(8mm 导程,普通旋转编码器电机),直接给导程最省事:
+**Lead screw axis** (8mm/rev, regular rotary encoder motor) — giving the lead
+is the least error-prone:
 
 ```ini
 [odrive_can x_drive]
 node_id: 0
 letter: x
-screw_lead: 8        # 圈/mm,等价于 unit_scale = 0.125
-velocity_limit: 30   # [圈/s]
-current_limit: 10    # [A],电流单位不受影响
+screw_lead: 8        # turns per mm, equivalent to unit_scale = 0.125
+velocity_limit: 30   # [turns/s]
+current_limit: 10    # [A], unchanged
 ```
 
-**旋转工作台**(想把"度"当 Klipper 的长度单位用):
+**Rotary table** (using degrees as the Klipper "length" unit):
 
 ```ini
 [odrive_can rot]
 node_id: 1
-unit_scale: 0.00277778   # 1/360,这样 1 "mm" := 1°,G0 G1 直接写角度
+unit_scale: 0.00277778   # 1/360, so 1 "mm" := 1 degree; write angles in G0/G1
 ```
 
-模块内部本来就只有一个 `unit_scale` 换算:直线方案是 mm→米,旋转方案是
-mm→圈(或度),其余部分——流式跟随、手动移动、回零、心跳监视——完全一样。
-`ODRIVE_CAN_STATUS` 回读的位置/速度也按同一换算显示回毫米。
+Internally there is exactly one `unit_scale` conversion: mm->meters for the
+linear flavor, mm->turns (or degrees) for the rotary one. Everything else —
+trajectory streaming, manual moves, homing, heartbeat monitoring — is
+identical, and `ODRIVE_CAN_STATUS` reads positions/velocities back through
+the same factor.
 
-## 已知限制
+## Two ways to use it
 
-- 流式跟随的是规划轨迹,ODrive 真正跟没跟上 Klipper 并不知道(没有反向
-  反馈)。模块会监听 ODrive 心跳,驱动器报错或掉线会自动停流并打日志,
-  但建议周期性看看 `ODRIVE_CAN_STATUS`。
-- SINCOS 磁栅尺的位置更新率就是 8kHz 电流环频率,速度太快时每个信号周期
-  内采样点变少,精度会掉。
+**Independent axis** (glue tables, laser stages, ...): don't put the axis in
+the printer kinematics at all; control it with `ODRIVE_CAN_MOVE` /
+`ODRIVE_CAN_HOME` macros. `letter` can be anything.
 
-## 相关仓库
+**Mirrored/gantry follower** (dual-drive gantries): the axis still has a
+regular stepper in the kinematics, and the ODrive follows the X (or Y/Z)
+planned trajectory in real time as a fully closed-loop slave.
 
-- ODrive 官方 CAN 协议说明:https://docs.odriverobotics.com/v/latest/guides/can-guide.html
+Want a single linear motor to *be* the whole X axis, wired into G28 and the
+kinematics? That needs virtual-stepper support inside Klipper itself — its
+motion architecture requires every kinematic axis to bind to an MCU step
+pin, a limitation discussed for years in Klipper issue #3151. This module
+deliberately stays out of the core.
+
+## Known limitations
+
+- Streaming follows the *planned* trajectory; Klipper has no idea whether the
+  ODrive is actually keeping up (no feedback path back). The module watches
+  the ODrive heartbeat and stops streaming on drive errors or link loss, but
+  it's worth glancing at `ODRIVE_CAN_STATUS` now and then.
+- SINCOS magnetic scales update at the 8kHz current-loop rate; at high speed
+  there are fewer samples per signal period and resolution degrades.
+
+## See also
+
+- ODrive CAN protocol guide: https://docs.odriverobotics.com/v/latest/guides/can-guide.html
+- Companion firmware: https://github.com/yunyuancai/odrive-linear
