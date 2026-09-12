@@ -128,6 +128,30 @@ motion architecture requires every kinematic axis to bind to an MCU step
 pin, a limitation discussed for years in Klipper issue #3151. This module
 deliberately stays out of the core.
 
+## Fluidd embedded panel
+
+Fluidd has no native iframe panel, so `embed/` ships a small injector instead:
+a toggleable floating ODrive panel rendered inside the Fluidd page itself,
+backed by the open-source
+[odrive3.6_web_gui](https://github.com/MoonLighTingPY/odrive3.6_web_gui)
+running on the same host (full parameter tree, live charts, config wizard,
+odrivetool-style console — it speaks USB, so connect the ODrive to the Pi's
+USB port in addition to CAN).
+
+On the Pi:
+
+```bash
+git clone https://github.com/yunyuancai/klipper-odrive-can.git
+cd klipper-odrive-can/embed
+sudo bash install-fluidd-panel.sh
+```
+
+The installer sets the Web GUI up as a systemd service on port 3000 and
+patches Fluidd's `index.html` (idempotent — re-run it after a Fluidd update).
+A blue **OD** button appears in the bottom-right corner of Fluidd; it opens
+the panel in-page, with an "open in tab" fallback. Works for Mainsail too —
+or simply add `http://<pi>:3000` to Mainsail's custom navigation.
+
 ## Known limitations
 
 - Streaming follows the *planned* trajectory; Klipper has no idea whether the
