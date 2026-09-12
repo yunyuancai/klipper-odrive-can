@@ -8,10 +8,13 @@
 # CAN-simple protocol: Set_Input_Pos = float32 pos + int16 vel_ff + int16 tq_ff,
 # message id = (node_id << 5) | cmd, 11-bit standard id.
 #
-# Meant to be used with a firmware that has linear scale support
-# (encoder.config.is_linear), where positions are in METERS and
-# unit_scale (default 0.001) converts Klipper's mm. For stock rotary
-# firmware set unit_scale to your mm->turn factor instead.
+# Works with both motor flavours:
+#  - linear motor + linear/magnetic scale: use the modified firmware with
+#    encoder.config.is_linear, positions are in METERS, unit_scale = 0.001
+#    converts Klipper's mm.
+#  - rotary motor (stock ODrive firmware works fine): positions are in TURNS.
+#    Set unit_scale to your mm->turn factor, or just give screw_lead
+#    (mm per revolution) and the module derives it: unit_scale = 1/screw_lead.
 #
 # Only the Python standard library is used (raw AF_CAN socket), so there is
 # nothing to pip install on the host.
@@ -120,7 +123,11 @@ class ODriveCanAxis:
         self.letter = config.getchoice('letter', AXIS_LETTER_IDX, 'x')
         # Multiplier from Klipper's mm to ODrive position units.
         # Linear firmware (is_linear): position in meters -> 0.001.
+        # Rotary: turns per mm, e.g. 1/screw_lead. Overrides below.
         self.unit_scale = config.getfloat('unit_scale', 0.001)
+        screw_lead = config.getfloat('screw_lead', None, minval=0.)
+        if screw_lead:
+            self.unit_scale = 1.0 / screw_lead
         self.stream_rate = config.getfloat('stream_rate', 60., above=1.,
                                            maxval=250.)
         self.stream_lead = config.getfloat('stream_lead', 0.005,

@@ -14,9 +14,10 @@ Klipper(树莓派)──运动规划(trapq)──> odrive_can.py ──CAN 500k�
                                                             ↑ 光栅尺/磁栅尺接 J5
 ```
 
-配套固件:[odrive-linear](https://github.com/yunyuancai/odrive-linear),ODrive devel 分支加了线性光栅尺支持的修改版。
-`encoder.config.is_linear = True` 后位置单位是米,模块里的
-`unit_scale: 0.001` 就是做 mm→m 的换算。
+配套固件:直线电机方案用 [odrive-linear](https://github.com/yunyuancai/odrive-linear)
+(ODrive devel 分支加了线性光栅尺支持的修改版),`encoder.config.is_linear = True`
+后位置单位是米,模块里的 `unit_scale: 0.001` 做 mm→m 换算。
+旋转电机不用换固件,官方固件直接可用,见下文[旋转电机](#旋转电机)一节。
 
 ## 安装
 
@@ -36,7 +37,7 @@ sudo ip link set can0 up type can bitrate 500000   # 和 ODrive 端保持一致
 node_id: 0              # axis0 默认节点号 0
 can_interface: can0
 letter: x               # 打印运动中跟随哪个轴(x/y/z)
-unit_scale: 0.001       # Klipper 毫米 -> ODrive 米
+unit_scale: 0.001       # Klipper 毫米 -> ODrive 单位(直线电机:米;旋转电机:圈,或直接用 screw_lead)
 stream_rate: 60         # 流式下发频率,宿主性能好可以开到 100
 stream_lead: 0.005      # 提前量,把 5ms 后的位置发出去
 vel_ff_gain: 1.0        # 速度前馈比例
@@ -80,6 +81,35 @@ gcode:
 想用一颗直线电机单独顶掉整个 X 轴、并接进 G28/运动学的话,得给 Klipper
 加虚拟 stepper 支持——Klipper 的运动轴必须绑定 MCU step 引脚,这是它的
 架构限制,官方 issue #3151 讨论了很多年也没落地,这个模块没有去动内核。
+
+## 旋转电机
+
+这套模块不是只给直线电机的,旋转电机(丝杆、转台、主轴之类)同样能用,
+而且**用 ODrive 官方固件就行**,不需要刷修改版固件——区别只是 ODrive 的
+位置单位从"米"变回"圈",换算配好即可:
+
+**丝杆滑台**(8mm 导程,普通旋转编码器电机),直接给导程最省事:
+
+```ini
+[odrive_can x_drive]
+node_id: 0
+letter: x
+screw_lead: 8        # 圈/mm,等价于 unit_scale = 0.125
+velocity_limit: 30   # [圈/s]
+current_limit: 10    # [A],电流单位不受影响
+```
+
+**旋转工作台**(想把"度"当 Klipper 的长度单位用):
+
+```ini
+[odrive_can rot]
+node_id: 1
+unit_scale: 0.00277778   # 1/360,这样 1 "mm" := 1°,G0 G1 直接写角度
+```
+
+模块内部本来就只有一个 `unit_scale` 换算:直线方案是 mm→米,旋转方案是
+mm→圈(或度),其余部分——流式跟随、手动移动、回零、心跳监视——完全一样。
+`ODRIVE_CAN_STATUS` 回读的位置/速度也按同一换算显示回毫米。
 
 ## 已知限制
 
