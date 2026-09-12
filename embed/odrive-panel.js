@@ -66,4 +66,123 @@
   } else {
     mount();
   }
+
+  // ---- dashboard status card (injected into the Fluidd dashboard) --------
+
+  var CARD_PATHS = [
+    'axis0.current_state',
+    'axis0.encoder.pos_estimate',
+    'axis0.encoder.vel_estimate',
+    'vbus_voltage',
+    'axis0.motor.current_control.Iq_measured',
+    'axis0.error'
+  ];
+  var STATE_NAMES = {
+    0: 'UNDEFINED', 1: 'IDLE', 2: 'STARTUP', 3: 'FULL CALIB', 4: 'MOTOR CAL',
+    5: 'SENSORLESS', 6: 'INDEX SEARCH', 7: 'ENC OFFSET CAL', 8: 'CLOSED LOOP',
+    9: 'LOCKIN', 10: 'DIR FIND', 11: 'HOMING'
+  };
+
+  function cardEl(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  var cardWrap = null, cardDot = null, cardState = null, cardPos = null,
+      cardVel = null, cardVbus = null, cardIq = null, cardErr = null;
+
+  function buildCard() {
+    var wrap = cardEl('div', 'col col-12 col-sm-6 col-md-4 od-card-col');
+    var card = cardEl('div', 'v-card v-sheet theme--dark');
+    card.style.minHeight = '140px';
+    var head = cardEl('div', 'd-flex align-center justify-space-between px-4 pt-3');
+    var t = cardEl('span', 'title', 'ODrive');
+    var dotWrap = cardEl('div', 'd-flex align-center');
+    cardDot = cardEl('span');
+    cardDot.style.cssText = 'width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;background:#888;';
+    var st = cardEl('span', 'caption', 'offline');
+    cardDot._st = st;
+    dotWrap.appendChild(cardDot); dotWrap.appendChild(st);
+    head.appendChild(t); head.appendChild(dotWrap);
+    card.appendChild(head);
+
+    var body = cardEl('div', 'px-4 py-2');
+    function row(label) {
+      var r = cardEl('div', 'd-flex justify-space-between py-1');
+      r.style.borderBottom = '1px solid rgba(128,128,128,.15)';
+      var l = cardEl('span', 'caption', label);
+      l.style.opacity = '.7';
+      var v = cardEl('span', 'body-2', '--');
+      r.appendChild(l); r.appendChild(v);
+      body.appendChild(r);
+      return v;
+    }
+    cardState = row('State');
+    cardPos = row('Position');
+    cardVel = row('Velocity');
+    cardVbus = row('Vbus');
+    cardIq = row('Iq');
+    cardErr = row('Error');
+    card.appendChild(body);
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  function fmt(v, unit, digits) {
+    return (typeof v === 'number' ? v.toFixed(digits) : '--') + (unit ? ' ' + unit : '');
+  }
+
+  function pollCard() {
+    fetch(PANEL_URL + 'api/devices', { mode: 'cors' })
+      .then(function (r) { return r.json(); })
+      .then(function (devs) {
+        if (!devs || !devs.length) throw new Error('no device');
+        var ser = devs[0].serial_number || devs[0].serial;
+        return fetch(PANEL_URL + 'api/devices/' + ser + '/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: CARD_PATHS })
+        }).then(function (r) { return r.json(); });
+      })
+      .then(function (res) {
+        if (cardDot) {
+          cardDot.style.background = '#4caf50';
+          if (cardDot._st) cardDot._st.textContent = 'connected';
+        }
+        var v = function (p) { return res && res[p] && typeof res[p] === 'object' ? undefined : res[p]; };
+        var st = v('axis0.current_state');
+        if (cardState) cardState.textContent = STATE_NAMES[st] !== undefined ? STATE_NAMES[st] : String(st);
+        if (cardPos) cardPos.textContent = fmt(v('axis0.encoder.pos_estimate'), '', 3);
+        if (cardVel) cardVel.textContent = fmt(v('axis0.encoder.vel_estimate'), '/s', 2);
+        if (cardVbus) cardVbus.textContent = fmt(v('vbus_voltage'), 'V', 1);
+        if (cardIq) cardIq.textContent = fmt(v('axis0.motor.current_control.Iq_measured'), 'A', 2);
+        var err = v('axis0.error');
+        if (cardErr) {
+          cardErr.textContent = err ? '0x' + (err >>> 0).toString(16) : 'none';
+          cardErr.style.color = err ? '#ff5252' : '';
+        }
+      })
+      .catch(function () {
+        if (cardDot) {
+          cardDot.style.background = '#888';
+          if (cardDot._st) cardDot._st.textContent = 'offline';
+        }
+        if (cardState) cardState.textContent = '--';
+      });
+  }
+
+  function tryMountCard() {
+    if (cardWrap && cardWrap.isConnected) return;
+    var main = document.querySelector('.v-main .container');
+    if (!main) return;
+    var row = main.querySelector('.row');
+    if (!row) return;
+    if (!cardWrap) cardWrap = buildCard();
+    row.insertBefore(cardWrap, row.firstChild);
+  }
+
+  setInterval(tryMountCard, 1500);
+  setInterval(pollCard, 700);
 })();
