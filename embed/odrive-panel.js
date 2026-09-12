@@ -96,6 +96,7 @@
 
   var svgFlash = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="vertical-align:middle;margin-right:8px;"><path d="M7,2V13H10V22L17,10H13L17,2H7Z"/></svg>';
   var svgChevron = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="transition:transform .2s;"><path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/></svg>';
+  var svgOpen = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.89 3,5V19C3,20.1 3.89,21 5,21H19C20.1,21 21,20.1 21,19V12H19V19Z"/></svg>';
 
   function buildCard() {
     var wrap = cardEl('div', 'col col-12 col-sm-6 col-md-4 od-card-col');
@@ -111,6 +112,13 @@
     colL.appendChild(iconSpan);
     colL.appendChild(cardEl('span', 'font-weight-light', 'ODrive'));
     var colR = cardEl('div', 'col col-auto align-self-center d-flex align-center');
+    var openBtn = cardEl('button', 'v-btn v-btn--icon v-btn--round v-size--default theme--dark mr-1');
+    openBtn.title = 'open ODrive GUI';
+    openBtn.style.cssText = 'width:28px;height:28px;';
+    var openC = cardEl('span', 'v-btn__content');
+    openC.innerHTML = svgOpen;
+    openBtn.appendChild(openC);
+    openBtn.addEventListener('click', function () { setPanel(true); });
     var dotWrap = cardEl('span', 'mr-2 d-inline-flex align-center');
     cardDot = cardEl('span');
     cardDot.style.cssText = 'width:10px;height:10px;border-radius:50%;display:inline-block;background:#888;margin-right:4px;';
@@ -124,7 +132,7 @@
     cardChev.style.cssText = 'display:inline-flex;';
     cardChev.innerHTML = svgChevron;
     btnC.appendChild(cardChev); btn.appendChild(btnC);
-    colR.appendChild(dotWrap); colR.appendChild(btn);
+    colR.appendChild(openBtn); colR.appendChild(dotWrap); colR.appendChild(btn);
     hrow.appendChild(colL); hrow.appendChild(colR);
     title.appendChild(hrow); card.appendChild(title);
 
@@ -214,9 +222,26 @@
     if (cardWrap && cardWrap.isConnected) return;
     var main = document.querySelector('.v-main .container');
     if (!main) return;
+    // preferred spot: right below the temperature panel
+    var cards = main.querySelectorAll('.v-card');
+    var temp = null;
+    for (var i = 0; i < cards.length; i++) {
+      var h = cards[i].querySelector('.card-heading');
+      if (h && /温度|temperature/i.test(h.textContent)) { temp = cards[i]; break; }
+    }
+    if (temp) {
+      if (!cardWrap) cardWrap = buildCard();
+      cardWrap.className = 'od-card-col';
+      cardWrap.style.width = '100%';
+      temp.insertAdjacentElement('afterend', cardWrap);
+      return;
+    }
+    // fallback: top of the dashboard grid
     var row = main.querySelector('.row');
     if (!row) return;
     if (!cardWrap) cardWrap = buildCard();
+    cardWrap.className = 'col col-12 col-sm-6 col-md-4';
+    cardWrap.style.width = '';
     row.insertBefore(cardWrap, row.firstChild);
   }
 
