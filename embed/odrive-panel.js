@@ -91,24 +91,45 @@
   }
 
   var cardWrap = null, cardDot = null, cardState = null, cardPos = null,
-      cardVel = null, cardVbus = null, cardIq = null, cardErr = null;
+      cardVel = null, cardVbus = null, cardIq = null, cardErr = null,
+      cardBody = null, cardChev = null;
+
+  var svgFlash = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="vertical-align:middle;margin-right:8px;"><path d="M7,2V13H10V22L17,10H13L17,2H7Z"/></svg>';
+  var svgChevron = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="transition:transform .2s;"><path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/></svg>';
 
   function buildCard() {
     var wrap = cardEl('div', 'col col-12 col-sm-6 col-md-4 od-card-col');
-    var card = cardEl('div', 'v-card v-sheet theme--dark');
-    card.style.minHeight = '140px';
-    var head = cardEl('div', 'd-flex align-center justify-space-between px-4 pt-3');
-    var t = cardEl('span', 'title', 'ODrive');
-    var dotWrap = cardEl('div', 'd-flex align-center');
-    cardDot = cardEl('span');
-    cardDot.style.cssText = 'width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;background:#888;';
-    var st = cardEl('span', 'caption', 'offline');
-    cardDot._st = st;
-    dotWrap.appendChild(cardDot); dotWrap.appendChild(st);
-    head.appendChild(t); head.appendChild(dotWrap);
-    card.appendChild(head);
+    var card = cardEl('div', 'v-card v-sheet theme--dark collapsable-card');
 
-    var body = cardEl('div', 'px-4 py-2');
+    // header, mirroring fluidd's CollapsableCard.vue
+    var title = cardEl('div', 'v-card__title collapsable-card-title card-heading py-2 px-4');
+    var hrow = cardEl('div', 'row no-gutters flex-nowrap');
+    var colL = cardEl('div', 'col align-self-center text-no-wrap');
+    var iconSpan = cardEl('span');
+    iconSpan.style.cssText = 'display:inline-flex;vertical-align:middle;opacity:.85;margin-right:8px;';
+    iconSpan.innerHTML = svgFlash;
+    colL.appendChild(iconSpan);
+    colL.appendChild(cardEl('span', 'font-weight-light', 'ODrive'));
+    var colR = cardEl('div', 'col col-auto align-self-center d-flex align-center');
+    var dotWrap = cardEl('span', 'mr-2 d-inline-flex align-center');
+    cardDot = cardEl('span');
+    cardDot.style.cssText = 'width:10px;height:10px;border-radius:50%;display:inline-block;background:#888;margin-right:4px;';
+    var stLbl = cardEl('span', 'caption', 'offline');
+    cardDot._st = stLbl;
+    dotWrap.appendChild(cardDot); dotWrap.appendChild(stLbl);
+    var btn = cardEl('button', 'v-btn v-btn--icon v-btn--round v-size--default theme--dark');
+    btn.style.cssText = 'width:32px;height:32px;';
+    var btnC = cardEl('span', 'v-btn__content');
+    cardChev = cardEl('span');
+    cardChev.style.cssText = 'display:inline-flex;';
+    cardChev.innerHTML = svgChevron;
+    btnC.appendChild(cardChev); btn.appendChild(btnC);
+    colR.appendChild(dotWrap); colR.appendChild(btn);
+    hrow.appendChild(colL); hrow.appendChild(colR);
+    title.appendChild(hrow); card.appendChild(title);
+
+    cardBody = cardEl('div', 'v-card__text py-2 px-4 overflow-hidden');
+    var body = cardEl('div');
     function row(label) {
       var r = cardEl('div', 'd-flex justify-space-between py-1');
       r.style.borderBottom = '1px solid rgba(128,128,128,.15)';
@@ -125,7 +146,23 @@
     cardVbus = row('Vbus');
     cardIq = row('Iq');
     cardErr = row('Error');
-    card.appendChild(body);
+    card.appendChild(cardBody); cardBody.appendChild(body);
+
+    btn.addEventListener('click', function () {
+      var collapsed = cardBody.style.display === 'none';
+      cardBody.style.display = collapsed ? '' : 'none';
+      cardChev.style.transform = collapsed ? '' : 'rotate(180deg)';
+      card.classList.toggle('collapsed', !collapsed);
+      try { localStorage.setItem('odriveCardCollapsed', collapsed ? '0' : '1'); } catch (e) {}
+    });
+    var collapsed0 = '0';
+    try { collapsed0 = localStorage.getItem('odriveCardCollapsed') || '0'; } catch (e) {}
+    if (collapsed0 === '1') {
+      cardBody.style.display = 'none';
+      cardChev.style.transform = 'rotate(180deg)';
+      card.classList.add('collapsed');
+    }
+
     wrap.appendChild(card);
     return wrap;
   }
